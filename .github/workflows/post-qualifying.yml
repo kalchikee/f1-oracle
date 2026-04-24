@@ -1,0 +1,102 @@
+name: F1 Post-Qualifying Predictions
+
+# Saturday post-qualifying — fires after each qualifying session (~4 PM local time)
+# Runs on race weekends only (~24 per year)
+# Manual trigger available for testing
+
+on:
+  schedule:
+    # Saturday 21:00 UTC = ~5 PM ET / 10 PM BST / covers most qualifying sessions globally
+    # F1 qualifying typically ends by 4 PM local Saturday
+    # Months: March–December (F1 season)
+    - cron: '0 21 * * 6'
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Season year (default: current)'
+        required: false
+      round:
+        description: 'Round number (default: next race)'
+        required: false
+
+jobs:
+  post-qualifying:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Restore DB from most recent artifact (carries Elo + stored predictions)
+      - name: Restore database
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: f1-oracle-db
+          path: data/
+          if_no_artifact_found: ignore
+          workflow_conclusion: ''
+        continue-on-error: true
+
+      # Restore calibration params
+      - name: Restore calibration
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: f1-oracle-calibration
+          path: data/
+          if_no_artifact_found: ignore
+          workflow_conclusion: ''
+        continue-on-error: true
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install fastf1 pandas numpy scikit-learn
+
+      # Fetch FastF1 data (real lap times, qualifying pace)
+      - name: Fetch FastF1 data
+        run: |
+          SEASON=${{ github.event.inputs.season || '' }}
+          if [ -n "$SEASON" ]; then
+            python python/data_pipeline.py --season $SEASON
+          else
+            python python/data_pipeline.py
+          fi
+        continue-on-error: true  # Don't block if FastF1 unavailable
+
+      # Send post-qualifying Discord embed
+      - name: Send post-qualifying predictions
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.season }}" ]; then
+            ARGS="$ARGS --season ${{ github.event.inputs.season }}"
+          fi
+          if [ -n "${{ github.event.inputs.round }}" ]; then
+            ARGS="$ARGS --round ${{ github.event.inputs.round }}"
+          fi
+          node --loader ts-node/esm src/index.ts --alert qualifying $ARGS
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LOG_LEVEL: info
+          LOG_FORMAT: json
+
+      # Save updated DB (contains new predictions)
+      - name: Save database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-oracle-db
+          path: data/f1_oracle.db
+          retention-days: 30
+          overwrite: true

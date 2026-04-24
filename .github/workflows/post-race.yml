@@ -1,0 +1,103 @@
+name: F1 Post-Race Recap
+
+# Sunday post-race — fires after each F1 race (~2 hours after race start)
+# F1 races typically start 2–3 PM local Sunday, finish ~4–5 PM local
+# Using 20:00 UTC Sunday to catch most races globally
+
+on:
+  schedule:
+    # Sunday 20:00 UTC — should capture most race finishes
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Season year (default: current)'
+        required: false
+      round:
+        description: 'Round number (default: most recent)'
+        required: false
+
+jobs:
+  post-race:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Restore DB (must have the qualifying prediction stored to score it)
+      - name: Restore database
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: f1-oracle-db
+          path: data/
+          if_no_artifact_found: ignore
+          workflow_conclusion: ''
+        continue-on-error: true
+
+      - name: Restore calibration
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: f1-oracle-calibration
+          path: data/
+          if_no_artifact_found: ignore
+          workflow_conclusion: ''
+        continue-on-error: true
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install fastf1 pandas numpy scikit-learn
+
+      # Send post-race recap (scores qualifying prediction, updates Elo, sends embed)
+      - name: Send post-race recap
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.season }}" ]; then
+            ARGS="$ARGS --season ${{ github.event.inputs.season }}"
+          fi
+          if [ -n "${{ github.event.inputs.round }}" ]; then
+            ARGS="$ARGS --round ${{ github.event.inputs.round }}"
+          fi
+          node --loader ts-node/esm src/index.ts --alert recap $ARGS
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LOG_LEVEL: info
+          LOG_FORMAT: json
+
+      # Re-train calibration with updated race result
+      - name: Update calibration model
+        run: python python/train_calibration.py
+        continue-on-error: true
+
+      # Save updated DB (with race results, updated Elo, and accuracy record)
+      - name: Save database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-oracle-db
+          path: data/f1_oracle.db
+          retention-days: 30
+          overwrite: true
+
+      # Save updated calibration
+      - name: Save calibration
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-oracle-calibration
+          path: data/calibration_params.json
+          retention-days: 90
+          overwrite: true

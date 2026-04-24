@@ -1,0 +1,36 @@
+{
+  "name": "f1-oracle",
+  "version": "4.1.0",
+  "description": "F1 Oracle v4.1 — ML prediction engine with race simulation, Constructor Power Model, and Discord embeds",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --loader ts-node/esm src/index.ts",
+    "dev": "node --loader ts-node/esm src/index.ts",
+    "pipeline": "node --loader ts-node/esm src/pipeline.ts",
+    "alerts:practice": "node --loader ts-node/esm src/index.ts --alert practice",
+    "alerts:qualifying": "node --loader ts-node/esm src/index.ts --alert qualifying",
+    "alerts:recap": "node --loader ts-node/esm src/index.ts --alert recap",
+    "alerts:preseason": "node --loader ts-node/esm src/index.ts --alert preseason",
+    "backtest": "node --loader ts-node/esm src/backtest.ts",
+    "backtest:2025": "node --loader ts-node/esm src/backtest.ts --seasons 2025",
+    "fetch-data": "python python/data_pipeline.py",
+    "train": "python python/train_calibration.py",
+    "clean": "rimraf dist cache/*.json"
+  },
+  "dependencies": {
+    "sql.js": "^1.12.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2",
+    "pino": "^8.19.0",
+    "pino-pretty": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/sql.js": "^1.4.9",
+    "@types/node": "^20.12.7",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

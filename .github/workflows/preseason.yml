@@ -1,0 +1,55 @@
+name: F1 Preseason Setup
+
+# Manually triggered in February after pre-season testing.
+# Loads prior-season data, analyzes preseason testing times, sends setup embed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Season year'
+        required: true
+        default: '2026'
+
+jobs:
+  preseason:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install fastf1 pandas numpy scikit-learn
+
+      # Initialize DB fresh for new season
+      - name: Initialize preseason
+        run: |
+          node --loader ts-node/esm src/index.ts --alert preseason --season ${{ github.event.inputs.season }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LOG_LEVEL: info
+          LOG_FORMAT: json
+
+      # Save fresh DB with seeded Elo and constructor baseline
+      - name: Save database
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-oracle-db
+          path: data/f1_oracle.db
+          retention-days: 365
+          overwrite: true

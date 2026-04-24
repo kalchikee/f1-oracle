@@ -1,0 +1,97 @@
+name: F1 Post-Practice Predictions
+
+# Friday post-practice — initial predictions based on FP pace data
+# FP1 is typically 12:30 local, FP2 is typically 16:00 local
+# Using 19:00 UTC Friday to catch FP2 completion globally
+
+on:
+  schedule:
+    # Friday 19:00 UTC — after FP2 in most time zones
+    - cron: '0 19 * * 5'
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Season year (default: current)'
+        required: false
+      round:
+        description: 'Round number (default: next race)'
+        required: false
+
+jobs:
+  post-practice:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore database
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: f1-oracle-db
+          path: data/
+          if_no_artifact_found: ignore
+          workflow_conclusion: ''
+        continue-on-error: true
+
+      - name: Restore calibration
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          name: f1-oracle-calibration
+          path: data/
+          if_no_artifact_found: ignore
+          workflow_conclusion: ''
+        continue-on-error: true
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: pip install fastf1 pandas numpy
+
+      # Fetch FP2 long-run pace data from FastF1
+      - name: Fetch practice data
+        run: |
+          SEASON=${{ github.event.inputs.season || '' }}
+          if [ -n "$SEASON" ]; then
+            python python/data_pipeline.py --season $SEASON
+          else
+            python python/data_pipeline.py
+          fi
+        continue-on-error: true
+
+      # Send Friday preview embed
+      - name: Send post-practice preview
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.season }}" ]; then
+            ARGS="$ARGS --season ${{ github.event.inputs.season }}"
+          fi
+          if [ -n "${{ github.event.inputs.round }}" ]; then
+            ARGS="$ARGS --round ${{ github.event.inputs.round }}"
+          fi
+          node --loader ts-node/esm src/index.ts --alert practice $ARGS
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LOG_LEVEL: info
+          LOG_FORMAT: json
+
+      - name: Save database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-oracle-db
+          path: data/f1_oracle.db
+          retention-days: 30
+          overwrite: true
