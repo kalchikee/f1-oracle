@@ -143,9 +143,19 @@ async function runQualifyingAlert(season: number, round: number): Promise<void> 
   const { sendPostQualifyingEmbed } = await import('./alerts/discord.js');
   const { CIRCUIT_PROFILES } = await import('./features/circuitProfiles.js');
   const { getQualifyingResult } = await import('./api/f1Client.js');
+  const { writePredictionsFile } = await import('./kalshi/predictionsFile.js');
 
   const sim = await runPipeline({ season, round, mode: 'qualifying', verbose: false });
   if (!sim) { logger.warn('No simulation produced — cannot send qualifying embed'); return; }
+
+  // Write predictions JSON for kalshi-safety to consume.
+  try {
+    const date = new Date().toISOString().slice(0, 10);
+    const path = writePredictionsFile(date, sim);
+    logger.info({ path, season, round }, 'Wrote predictions JSON');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to write predictions JSON (non-fatal)');
+  }
 
   const calendar = await getRaceCalendar(season);
   const race = calendar.find(r => r.round === round);
