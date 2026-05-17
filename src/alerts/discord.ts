@@ -118,11 +118,25 @@ export async function sendPostPracticeEmbed(
     ].join('\n');
   }
 
+  // ── Season hit-rate ─────────────────────────────────────────────────────
+  // Pulled from the same SeasonAccuracy the recap uses, so morning + recap
+  // agree on the number. Only shown when the season has scored races
+  // (off-season / pre-round-1 → totalRaces === 0 → hidden).
+  const seasonAccField: DiscordField | null =
+    seasonAcc && seasonAcc.totalRaces > 0
+      ? {
+          name: '📊 Season Accuracy',
+          value: `**${pct(seasonAcc.winnerAccuracy)}** · ${seasonAcc.winnerCorrect}/${seasonAcc.totalRaces} race winners correct this season`,
+          inline: false,
+        }
+      : null;
+
   const embed: DiscordEmbed = {
     title: `🏁 F1 Oracle — ${context.grandPrix} | Friday Preview`,
     description: `${context.circuit} | Round ${context.round} of ${context.totalRounds} | ${circuitTypeLabel(context.circuitType)} | ${weatherLabel(context.weather, context.rainProbability)}`,
     color: F1_RED,
     fields: [
+      ...(seasonAccField ? [seasonAccField] : []),
       {
         name: '📊 Season Record',
         value: recordField,
