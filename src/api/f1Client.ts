@@ -49,27 +49,47 @@ async function fetchJson<T>(url: string, cacheKey?: string, retries = 3): Promis
   }
   logger.debug({ url }, 'Fetching');
 
+  let lastErr: Error | null = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
-    const resp = await fetch(url, {
-      headers: { 'User-Agent': 'F1Oracle/4.1 (+github)' },
-      signal: AbortSignal.timeout(20000),
-    });
+    try {
+      const resp = await fetch(url, {
+        headers: { 'User-Agent': 'F1Oracle/4.1 (+github)' },
+        signal: AbortSignal.timeout(20000),
+      });
 
-    if (resp.status === 429) {
-      // Rate limited — back off and retry
-      const waitMs = attempt * 3000; // 3s, 6s, 9s
-      logger.warn({ url, attempt, waitMs }, 'Rate limited (429) — backing off');
+      if (resp.status === 429) {
+        const waitMs = attempt * 3000;
+        logger.warn({ url, attempt, waitMs }, 'Rate limited (429) — backing off');
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      // 502/503/504 are transient gateway/proxy errors. Jolpica returns
+      // 504 Gateway Time-out under load — without retry we'd drop the
+      // qualifying result and save the prediction as pre_qualifying,
+      // which scorePreviousRace then can't grade.
+      if (resp.status >= 502 && resp.status <= 504) {
+        const waitMs = attempt * 2000;
+        logger.warn({ url, status: resp.status, attempt, waitMs }, 'Gateway error — backing off');
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+      const data = await resp.json() as T;
+      if (cacheKey) cacheSet(cacheKey, data);
+      return data;
+    } catch (err) {
+      // Network errors (DNS, timeout, ECONNRESET) — same retry policy
+      lastErr = err as Error;
+      if (attempt === retries) break;
+      const waitMs = attempt * 2000;
+      logger.warn({ url, err: lastErr.message, attempt, waitMs }, 'Fetch error — backing off');
       await new Promise(r => setTimeout(r, waitMs));
-      continue;
     }
-
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
-    const data = await resp.json() as T;
-    if (cacheKey) cacheSet(cacheKey, data);
-    return data;
   }
 
-  throw new Error(`Failed after ${retries} retries: ${url}`);
+  throw lastErr ?? new Error(`Failed after ${retries} retries: ${url}`);
 }
 
 // ─── 2026 F1 Season Driver Roster ─────────────────────────────────────────────

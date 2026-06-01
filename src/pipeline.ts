@@ -196,14 +196,24 @@ async function scorePreviousRace(
   // Update Elo
   updateEloAfterRace(raceResult, season);
 
-  // Score prediction
+  // Score prediction. Try post_qualifying first (the highest-information
+  // mode), then fall back through the chain. pre_qualifying is the mode
+  // saved when the Jolpica API returned a 504 / empty result during
+  // post-qualifying, which was happening for early 2026 races — without
+  // this fallback the season_accuracy row never gets initialized and the
+  // Discord embed shows "N/A" for podium accuracy.
   const prediction = getPredictionByRound(season, round, 'post_qualifying')
-    ?? getPredictionByRound(season, round, 'practice_only');
+    ?? getPredictionByRound(season, round, 'practice_only')
+    ?? getPredictionByRound(season, round, 'pre_qualifying');
 
   if (!prediction) {
     logger.warn({ season, round }, 'No prediction found to score');
     return currentSeasonAcc;
   }
+  logger.info(
+    { season, round, mode: prediction.simulationMode },
+    'Scoring prediction',
+  );
 
   const topTen = (raceResult.Results ?? [])
     .sort((a, b) => Number(a.position) - Number(b.position))
