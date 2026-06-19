@@ -469,6 +469,59 @@ export function upsertSeasonAccuracy(acc: SeasonAccuracy): void {
   );
 }
 
+export interface ConfidenceBucket {
+  label: string;     // e.g. "30-40%"
+  total: number;
+  correct: number;
+  accuracy: number;  // 0..1
+}
+
+// Per-confidence-bucket calibration for the F1 Oracle Discord embed.
+// F1 is a multi-driver race (not a 2-way game), so we bucket directly on
+// `winner_probability` — the model's confidence in its #1 winner pick —
+// without the max(p, 1-p) trick the 2-way sports use. Buckets are
+// half-open [lo, hi). F1 winner probabilities are typically lower than
+// 2-way sports (often 0.10-0.50), so we use a wider, tighter bucket set.
+// Only buckets with at least one graded race are returned so the embed
+// stays compact early in the season.
+export function getConfidenceBuckets(season: number): ConfidenceBucket[] {
+  const rows = queryAll<{ winner_probability: number; winner_correct: number }>(
+    `SELECT winner_probability, winner_correct
+       FROM race_predictions
+       WHERE winner_correct IS NOT NULL
+         AND season = ?`,
+    [season],
+  );
+  const buckets: Array<{ lo: number; hi: number; label: string; total: number; correct: number }> = [
+    { lo: 0.10, hi: 0.20, label: '10-20%', total: 0, correct: 0 },
+    { lo: 0.20, hi: 0.30, label: '20-30%', total: 0, correct: 0 },
+    { lo: 0.30, hi: 0.40, label: '30-40%', total: 0, correct: 0 },
+    { lo: 0.40, hi: 0.50, label: '40-50%', total: 0, correct: 0 },
+    { lo: 0.50, hi: 0.60, label: '50-60%', total: 0, correct: 0 },
+    { lo: 0.60, hi: 0.70, label: '60-70%', total: 0, correct: 0 },
+    { lo: 0.70, hi: 0.80, label: '70-80%', total: 0, correct: 0 },
+    { lo: 0.80, hi: 1.01, label: '80%+',   total: 0, correct: 0 },
+  ];
+  for (const r of rows) {
+    const p = r.winner_probability;
+    for (const b of buckets) {
+      if (p >= b.lo && p < b.hi) {
+        b.total += 1;
+        if (r.winner_correct === 1) b.correct += 1;
+        break;
+      }
+    }
+  }
+  return buckets
+    .filter(b => b.total > 0)
+    .map(b => ({
+      label: b.label,
+      total: b.total,
+      correct: b.correct,
+      accuracy: b.correct / b.total,
+    }));
+}
+
 export function getSeasonAccuracy(season: number): SeasonAccuracy | null {
   const row = queryOne<Record<string, number>>(
     'SELECT * FROM season_accuracy WHERE season = ?', [season],

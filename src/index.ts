@@ -11,7 +11,7 @@
 import 'dotenv/config';
 import { logger } from './logger.js';
 import { runPipeline } from './pipeline.js';
-import { initDb, closeDb, getSeasonAccuracy } from './db/database.js';
+import { initDb, closeDb, getSeasonAccuracy, getConfidenceBuckets } from './db/database.js';
 import { getCurrentF1Season, isF1Season, getRaceCalendar, getCurrentRaceRound } from './api/f1Client.js';
 import type { PipelineOptions } from './types.js';
 
@@ -136,7 +136,8 @@ async function runPracticeAlert(season: number, round: number): Promise<void> {
   };
 
   const seasonAcc = getSeasonAccuracy(season);
-  await sendPostPracticeEmbed(sim, context, seasonAcc);
+  const buckets = getConfidenceBuckets(season);
+  await sendPostPracticeEmbed(sim, context, seasonAcc, buckets);
 }
 
 async function runQualifyingAlert(season: number, round: number): Promise<void> {
@@ -197,7 +198,8 @@ async function runQualifyingAlert(season: number, round: number): Promise<void> 
   }));
 
   const seasonAcc = getSeasonAccuracy(season);
-  await sendPostQualifyingEmbed(sim, context, driverFeatures, seasonAcc);
+  const buckets = getConfidenceBuckets(season);
+  await sendPostQualifyingEmbed(sim, context, driverFeatures, seasonAcc, buckets);
 }
 
 async function runRecapAlert(season: number, round: number): Promise<void> {
@@ -271,7 +273,8 @@ async function runRecapAlert(season: number, round: number): Promise<void> {
     position: Number(s.position),
   }));
 
-  await sendPostRaceRecap(sim, actuals, context, seasonAcc, driverStandings);
+  const buckets = getConfidenceBuckets(season);
+  await sendPostRaceRecap(sim, actuals, context, seasonAcc, driverStandings, undefined, buckets);
 }
 
 async function runPreseasonAlert(season: number): Promise<void> {

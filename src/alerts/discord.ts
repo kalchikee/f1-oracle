@@ -7,6 +7,7 @@
 import fetch from 'node-fetch';
 import { logger } from '../logger.js';
 import type { DriverSimResult, RaceSimulation, SeasonAccuracy, RaceContext } from '../types.js';
+import type { ConfidenceBucket } from '../db/database.js';
 
 // ─── F1 Oracle brand color ────────────────────────────────────────────────────
 
@@ -93,12 +94,29 @@ function weatherLabel(weather: RaceContext['weather'], rainProb: number): string
   return `☀️ Dry (${pct(rainProb)} rain)`;
 }
 
+// Build the optional "Calibration by winner-pick confidence" field. Returns
+// null when there are no non-empty buckets so callers can omit the field
+// entirely (e.g. preseason or before round 1).
+function buildCalibrationField(buckets: ConfidenceBucket[] | undefined): DiscordField | null {
+  if (!buckets || buckets.length === 0) return null;
+  const lines = buckets.map(b => {
+    const accPct = (b.accuracy * 100).toFixed(1);
+    return `**${b.label}** · ${b.correct}/${b.total} (${accPct}%)`;
+  });
+  return {
+    name: '🎯 Calibration by winner-pick confidence',
+    value: lines.join('\n'),
+    inline: false,
+  };
+}
+
 // ─── 1. Post-Practice Embed (Friday) ─────────────────────────────────────────
 
 export async function sendPostPracticeEmbed(
   sim: RaceSimulation,
   context: RaceContext,
   seasonAcc: SeasonAccuracy | null,
+  buckets?: ConfidenceBucket[],
 ): Promise<boolean> {
   const top5 = sim.results.slice(0, 5);
   const top10 = sim.results.slice(0, 10);
@@ -131,12 +149,17 @@ export async function sendPostPracticeEmbed(
         }
       : null;
 
+  // Gate calibration on having at least one graded race this season.
+  const calibrationField: DiscordField | null =
+    seasonAcc && seasonAcc.totalRaces > 0 ? buildCalibrationField(buckets) : null;
+
   const embed: DiscordEmbed = {
     title: `🏁 F1 Oracle — ${context.grandPrix} | Friday Preview`,
     description: `${context.circuit} | Round ${context.round} of ${context.totalRounds} | ${circuitTypeLabel(context.circuitType)} | ${weatherLabel(context.weather, context.rainProbability)}`,
     color: F1_RED,
     fields: [
       ...(seasonAccField ? [seasonAccField] : []),
+      ...(calibrationField ? [calibrationField] : []),
       {
         name: '📊 Season Record',
         value: recordField,
@@ -172,6 +195,7 @@ export async function sendPostQualifyingEmbed(
   context: RaceContext,
   driverFeatures: Array<{ driverId: string; qualiPosition: number | null; teammateDelta: number }>,
   seasonAcc: SeasonAccuracy | null,
+  buckets?: ConfidenceBucket[],
 ): Promise<boolean> {
   const top10 = sim.results.slice(0, 10);
   const top3 = sim.results.slice(0, 3);
@@ -216,6 +240,10 @@ export async function sendPostQualifyingEmbed(
     podiumValue = `${seasonAcc.podiumSlotsCorrect}/${seasonAcc.podiumSlotsTotal} (${pct(seasonAcc.podiumSlotAccuracy)})`;
   }
 
+  // Gate calibration on having at least one graded race this season.
+  const calibrationField: DiscordField | null =
+    seasonAcc && seasonAcc.totalRaces > 0 ? buildCalibrationField(buckets) : null;
+
   const embeds: DiscordEmbed[] = [
     {
       title: `🏁 F1 Oracle — ${context.grandPrix} | Post-Qualifying Predictions`,
@@ -225,6 +253,7 @@ export async function sendPostQualifyingEmbed(
         { name: '🏆 Season Record (Winner)', value: recordValue, inline: true },
         { name: '🥇 Podium Accuracy', value: podiumValue, inline: true },
         { name: '🏎️ SC Probability', value: `${pct(context.safetyCarProbability)}`, inline: true },
+        ...(calibrationField ? [calibrationField] : []),
         {
           name: '📋 Predicted Top 10',
           value: top10Lines,
@@ -274,6 +303,7 @@ export async function sendPostRaceRecap(
   // Championship standings (top 5 drivers)
   driverStandings?: Array<{ driverName: string; points: number; position: number }>,
   constructorStandings?: Array<{ constructorName: string; points: number; position: number }>,
+  buckets?: ConfidenceBucket[],
 ): Promise<boolean> {
   const predicted = sim.results;
   const predictedWinner = predicted[0];
@@ -316,6 +346,10 @@ export async function sendPostRaceRecap(
       .join('\n');
   }
 
+  // Gate calibration on having at least one graded race this season.
+  const calibrationField: DiscordField | null =
+    seasonAcc.totalRaces > 0 ? buildCalibrationField(buckets) : null;
+
   const embeds: DiscordEmbed[] = [
     {
       title: `🏁 F1 Oracle — ${context.grandPrix} Recap ${winnerCorrect ? '✅' : '❌'}`,
@@ -337,6 +371,7 @@ export async function sendPostRaceRecap(
           value: seasonRecord,
           inline: false,
         },
+        ...(calibrationField ? [calibrationField] : []),
         {
           name: '📋 Position-by-Position (Top 10)',
           value: positionLines.join('\n') || 'N/A',
